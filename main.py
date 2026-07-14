@@ -444,6 +444,13 @@ def evaluate_candidates(quotes, cfg, shares_max, regime, vix_value):
     c = cfg["criteria"]
     pre_matches = []
 
+    premarket_now = _is_premarket_now()
+    vol_float_min = (
+        c.get("volume_to_float_min_premarket", c["volume_to_float_min"])
+        if premarket_now
+        else c["volume_to_float_min"]
+    )
+
     stats = {
         "sin_datos": 0,
         "vol_float": 0,
@@ -470,7 +477,7 @@ def evaluate_candidates(quotes, cfg, shares_max, regime, vix_value):
         # Rotación de float: cuántas veces se ha negociado el float completo hoy
         vol_to_float = vol / shares_out
 
-        if vol_to_float < c["volume_to_float_min"]:
+        if vol_to_float < vol_float_min:
             stats["vol_float"] += 1
             continue
         if pct < c["percent_gain_min"]:
@@ -533,7 +540,7 @@ def evaluate_candidates(quotes, cfg, shares_max, regime, vix_value):
     )
 
     matches.sort(key=lambda m: (m["volume_to_float"], m["percent_change"]), reverse=True)
-    return matches
+    return matches, vol_float_min
 
 
 # ---------------------------------------------------------------------------
@@ -564,7 +571,7 @@ def _sanitize_text(text):
     return text
 
 
-def build_email_html(matches, cfg, shares_max, regime, vix_value):
+def build_email_html(matches, cfg, shares_max, regime, vix_value, vol_float_min):
     max_results = cfg["email"].get("max_results", 3)
     top = matches[:max_results]
 
@@ -620,7 +627,7 @@ def build_email_html(matches, cfg, shares_max, regime, vix_value):
         {rows}
       </table>
       <p style="color:#888;font-size:12px;margin-top:20px;">
-        Criterios usados: Vol/Float >= {cfg['criteria']['volume_to_float_min']}x |
+        Criterios usados: Vol/Float >= {vol_float_min}x |
         % Día >= {cfg['criteria']['percent_gain_min']}% |
         Precio ${cfg['criteria']['price_min']}-${cfg['criteria']['price_max']} |
         Market Cap <= ${cfg['criteria']['market_cap_max']/1_000_000:.0f}M |
@@ -795,6 +802,77 @@ def _merge_always_include(quotes, cfg):
     return quotes
 
 
+SENT_LOG_PATH = "sent_alerts.json"
+
+
+def _load_sent_log():
+    """Carga el historial de qué tickers se enviaron y cuándo. Vive en un
+    archivo dentro del repo (sent_alerts.json) para que persista entre
+    corridas de GitHub Actions (cada corrida arranca 'desde cero', así que
+    sin esto no habría forma de recordar qué ya se avisó)."""
+    try:
+        with open(SENT_LOG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_sent_log(data):
+    try:
+        with open(SENT_LOG_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, sort_keys=True)
+    except Exception as e:
+        log.warning(f"No se pudo guardar el historial de alertas enviadas: {e}")
+
+
+def _parse_ts(ts_str):
+    try:
+        return datetime.fromisoformat(ts_str)
+    except Exception:
+        return None
+
+
+def filter_recently_sent(matches, cfg):
+    """Descarta de la lista los tickers que ya se enviaron por correo hace
+    menos de email.cooldown_hours. El escaneo/evaluación sigue corriendo
+    siempre sobre TODO el universo cada ciclo; esto solo filtra qué se
+    manda por correo, para no repetir la misma alerta cada 5 minutos."""
+    cooldown_hours = cfg["email"].get("cooldown_hours", 4)
+    if cooldown_hours <= 0:
+        return matches  # cooldown desactivado: siempre reenvía
+
+    sent_log = _load_sent_log()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=cooldown_hours)
+
+    fresh = []
+    for m in matches:
+        last_sent = _parse_ts(sent_log.get(m["symbol"], ""))
+        if last_sent and last_sent > cutoff:
+            continue  # ya se avisó hace poco, se omite del correo
+        fresh.append(m)
+    return fresh
+
+
+def mark_as_sent(matches, cfg):
+    """Registra los tickers recién enviados con la hora actual, y limpia
+    entradas viejas (>48h) para que el archivo no crezca indefinidamente."""
+    cooldown_hours = cfg["email"].get("cooldown_hours", 4)
+    if cooldown_hours <= 0:
+        return
+
+    sent_log = _load_sent_log()
+    now = datetime.now(timezone.utc)
+    for m in matches:
+        sent_log[m["symbol"]] = now.isoformat()
+
+    cleanup_cutoff = now - timedelta(hours=48)
+    sent_log = {
+        sym: ts for sym, ts in sent_log.items()
+        if _parse_ts(ts) and _parse_ts(ts) > cleanup_cutoff
+    }
+    _save_sent_log(sent_log)
+
+
 def run_once(cfg):
     log.info("=== Iniciando escaneo ===")
 
@@ -814,17 +892,30 @@ def run_once(cfg):
 
     quotes = _merge_always_include(quotes, cfg)
 
-    matches = evaluate_candidates(quotes, cfg, shares_max, regime, vix_value)
+    matches, vol_float_min = evaluate_candidates(quotes, cfg, shares_max, regime, vix_value)
     log.info(f"Candidatos que cumplen TODOS los criterios: {len(matches)}")
 
-    if matches:
-        html = build_email_html(matches, cfg, shares_max, regime, vix_value)
-        send_email(html, cfg, len(matches))
-    else:
-        if cfg["email"].get("send_even_if_no_matches"):
-            html = "<p>No se encontraron candidatos que cumplan todos los criterios en este ciclo.</p>"
-            send_email(html, cfg, 0)
+    matches_a_enviar = filter_recently_sent(matches, cfg)
+    omitidos = len(matches) - len(matches_a_enviar)
+    if omitidos:
+        cooldown_h = cfg["email"].get("cooldown_hours", 4)
+        log.info(
+            f"{omitidos} candidato(s) NO se re-envían (ya avisados hace menos de {cooldown_h}h)"
+        )
+
+    if matches_a_enviar:
+        html = build_email_html(matches_a_enviar, cfg, shares_max, regime, vix_value, vol_float_min)
+        send_email(html, cfg, len(matches_a_enviar))
+        enviados = matches_a_enviar[: cfg["email"].get("max_results", 3)]
+        mark_as_sent(enviados, cfg)
+    elif not matches and cfg["email"].get("send_even_if_no_matches"):
+        html = "<p>No se encontraron candidatos que cumplan todos los criterios en este ciclo.</p>"
+        send_email(html, cfg, 0)
+
+    if not matches:
         log.info("Sin candidatos que cumplan todos los criterios en este ciclo.")
+    elif not matches_a_enviar:
+        log.info("Había candidatos, pero todos ya se habían avisado recientemente (cooldown).")
 
     log.info("=== Escaneo finalizado ===")
 
@@ -870,10 +961,17 @@ def debug_ticker(symbol, cfg):
     print(f"Precio actual: ${price:.2f} (fuente: {q.get('price_source', 'regular')})")
     print(f"Volumen hoy: {vol:,} | Acciones en circulación: {shares_out:,}\n" if shares_out else f"Volumen hoy: {vol:,}\n")
 
+    premarket_now = _is_premarket_now()
+    vol_float_min = (
+        c.get("volume_to_float_min_premarket", c["volume_to_float_min"])
+        if premarket_now
+        else c["volume_to_float_min"]
+    )
+
     check(
         "Rotación de float (Vol/Float)",
-        vol_to_float is not None and vol_to_float >= c["volume_to_float_min"],
-        f"{vol_to_float:.2f}x (necesitas >= {c['volume_to_float_min']}x)" if vol_to_float else "sin dato",
+        vol_to_float is not None and vol_to_float >= vol_float_min,
+        f"{vol_to_float:.2f}x (necesitas >= {vol_float_min}x, {'premarket' if premarket_now else 'regular'})" if vol_to_float else "sin dato",
     )
     check(
         "% de subida hoy",

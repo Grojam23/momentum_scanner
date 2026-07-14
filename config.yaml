@@ -1,0 +1,99 @@
+# =========================================================
+# CONFIGURACIÓN DEL BOT DE ESCANEO "DEMANDA ALTA / OFERTA BAJA"
+# Basado en los 5 criterios de la imagen (Demand & Supply)
+# Cambia cualquier valor aquí, sin tocar el código (main.py)
+# =========================================================
+
+criteria:
+  # 1) Demand: Rotación de float (Volumen de hoy / Acciones en circulación)
+  # Reemplaza al antiguo "volumen relativo vs. promedio histórico", que se
+  # distorsionaba mucho con splits recientes y con comparar volumen parcial
+  # del día contra un promedio de día completo. Esta métrica es más directa:
+  # "¿cuántas veces se ha rotado el float completo hoy?"
+  volume_to_float_min: 5.0
+
+  # 2) Demand: % de subida mínimo en el día
+  percent_gain_min: 7.0
+
+  # 4) Demand: rango de precio preferido por day traders
+  price_min: 1.0
+  price_max: 20.0
+
+  # 6) Market Cap máximo (en USD). Pediste 60M
+  market_cap_max: 70000000
+
+  # 5) Supply: acciones disponibles (float / shares outstanding) máximo.
+  # Ahora el límite depende de si el mercado en general está "caliente" o
+  # "frío" (regla clásica de low-float trading: en mercado caliente se tolera
+  # más float porque hay más "combustible"/interés comprador general).
+  # Nota: el float "real" (público, sin insiders) casi nunca es gratis en APIs.
+  # Usamos "shares outstanding" como aproximación (ver INSTALL.md, sección "Limitaciones").
+  shares_outstanding_max_hot: 20000000    # mercado caliente (VIX alto)
+  shares_outstanding_max_cold: 10000000   # mercado frío (VIX bajo)
+
+  # Cómo se decide si el mercado está "caliente" o "frío":
+  # auto = se mide con el VIX en tiempo real (gratis, vía Yahoo)
+  # hot / cold = lo fuerzas tú manualmente, ignorando el VIX
+  market_regime: auto
+  vix_hot_threshold: 20   # VIX >= esto se considera mercado "caliente"
+
+  # 3) Demand: exigir que exista una noticia/evento reciente relacionado
+  require_news: false
+  news_lookback_hours: 24
+
+  # Con el universo ampliado (miles de tickers), muchos pueden pasar los
+  # filtros baratos (%, vol/float, precio, mcap). Para no golpear el límite
+  # gratuito de Finnhub (60 llamadas/min), solo se pide noticia a los N
+  # mejores candidatos (ya rankeados por rotación de float), no a todos.
+  news_check_limit: 15
+
+# De dónde sacamos el universo de tickers a escanear en cada corrida
+universe:
+  # tradingview_premarket: usa la categoría "pre-market-gainers" de TradingView
+  #                         (RECOMENDADO, mejor cobertura de microcaps ilíquidas
+  #                         que Yahoo, trae justo lo que buscas: top gainers de premarket)
+  # yahoo_custom_screener: filtra directo en Yahoo por market cap/precio/%
+  #                         (respaldo automático si TradingView falla)
+  # yahoo_screener: usa listas predefinidas de Yahoo (day_gainers, most_actives...),
+  #                 dominadas por empresas grandes, casi nunca traen microcaps de 60M
+  # custom: solo escanea los tickers que tú pongas en custom_tickers
+  source: tradingview_premarket
+
+  # Listas predefinidas de Yahoo que se combinan como universo candidato
+  # (solo se usan si source = yahoo_screener, o como respaldo)
+  screener_ids:
+    - "day_gainers"
+    - "most_actives"
+    - "small_cap_gainers"
+  # Con TradingView, esto ahora trae el UNIVERSO COMPLETO de small caps que
+  # cumplen market cap/precio (sin filtrar aún por %), para no perder nada
+  # por timing. 1000 cubre cómodamente el mercado US en microcaps; puedes
+  # subirlo hasta 3000 si quieres ser exhaustivo (un poco más lento).
+  screener_count: 3000
+
+  custom_tickers: []           # ej: ["AAPL", "TSLA"] si source = custom
+
+  # Tickers que SIEMPRE se agregan al universo automático, sin importar la
+  # fuente, para que nunca se te pierdan tus favoritos si el screener no
+  # los trae ese día (ej: los que sigues personalmente en Webull/TradingView)
+  always_include: []           # ej: ["SOBR", "MIMI"]
+
+# Cada cuánto corre el bot
+schedule:
+  interval_minutes: 20         # solo se usa si run_mode = loop
+  run_mode: once               # "once" = corre 1 vez y termina (ideal para GitHub Actions / cron)
+                                # "loop" = queda corriendo en background repitiendo cada interval_minutes
+
+# Configuración del correo
+email:
+  enabled: true
+  subject_prefix: "🚀 Alerta Demanda/Oferta"
+  smtp_server: smtp.gmail.com
+  smtp_port: 587
+  # Este valor es solo de respaldo/ejemplo. El correo real se toma de la
+  # variable de entorno RECIPIENT_EMAIL (en tu .env local, o como secreto de
+  # GitHub Actions), para que puedas tener el repositorio público sin exponer
+  # tu email aquí.
+  recipient_email: "tu_correo@ejemplo.com"
+  max_results: 5                              # cuántos tickers mandar como "los mejores"
+  send_even_if_no_matches: false              # si true, te avisa igual aunque no haya matches

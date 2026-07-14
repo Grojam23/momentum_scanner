@@ -1,0 +1,46 @@
+name: Momentum Scanner
+
+# Corre automáticamente cada 5 minutos, de 4:00am a 5:00pm hora de Nueva York
+# (cubre premarket + sesión regular + parte del after-hours).
+# EE.UU. en horario de verano (EDT) = UTC-4, por eso 4:00am-5:00pm ET = 8:00am-9:00pm UTC.
+# ⚠️ En horario de invierno (EST, UTC-5) esto se correría 1 hora más tarde en
+#    hora de Nueva York (o sea, sonaría de 5:00am a 6:00pm ET). Ajusta esta
+#    línea a fines de marzo / fines de octubre si quieres que sea exacto
+#    todo el año, según cuándo cambie EE.UU. (no coincide con el cambio de
+#    horario de España).
+#
+# ⚠️ IMPORTANTE: cada 5 min x 13 horas x 5 días = ~3,300 corridas/mes. Esto
+#    excede el límite gratis de 2,000 minutos/mes de GitHub Actions para
+#    repositorios PRIVADOS. Si tu repo es privado, o subes la frecuencia a
+#    algo más espaciado (ej. cada 10-15 min), o usa un repo PÚBLICO (minutos
+#    de Actions ilimitados y gratis en repos públicos). Ver INSTALL.md.
+on:
+  schedule:
+    - cron: "*/5 8-20 * * 1-5"
+    - cron: "0 21 * * 1-5"
+  workflow_dispatch: {}
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Ejecutar el bot
+        env:
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          SENDER_APP_PASSWORD: ${{ secrets.SENDER_APP_PASSWORD }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+        run: python main.py
+

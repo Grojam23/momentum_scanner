@@ -16,8 +16,7 @@ name: Momentum Scanner
 #    de Actions ilimitados y gratis en repos públicos). Ver INSTALL.md.
 on:
   schedule:
-    - cron: "*/5 8-20 * * 1-5"
-    - cron: "0 21 * * 1-5"
+    - cron: "* * * * *"
   workflow_dispatch: {}
 
 permissions:

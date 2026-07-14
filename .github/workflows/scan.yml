@@ -20,6 +20,9 @@ on:
     - cron: "0 21 * * 1-5"
   workflow_dispatch: {}
 
+permissions:
+  contents: write   # necesario para que el bot pueda guardar sent_alerts.json de vuelta al repo
+
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -43,4 +46,13 @@ jobs:
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
         run: python main.py
+
+      - name: Guardar historial de alertas enviadas (evita repetir avisos)
+        run: |
+          git config user.name "momentum-scanner-bot"
+          git config user.email "actions@github.com"
+          git add sent_alerts.json
+          git diff --cached --quiet && echo "Sin cambios en el historial" || git commit -m "Actualizar historial de alertas"
+          git pull --rebase
+          git push
 

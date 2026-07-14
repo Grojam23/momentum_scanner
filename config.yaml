@@ -102,7 +102,7 @@ email:
   # GitHub Actions), para que puedas tener el repositorio público sin exponer
   # tu email aquí.
   recipient_email: "tu_correo@ejemplo.com"
-  max_results: 3                              # cuántos tickers mandar como "los mejores"
+  max_results: 5                              # cuántos tickers mandar como "los mejores"
   send_even_if_no_matches: false              # si true, te avisa igual aunque no haya matches
 
   # Evita que te llegue la MISMA alerta repetida cada 5 minutos. El bot

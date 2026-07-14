@@ -1,0 +1,62 @@
+name: Momentum Scanner v2
+
+on:
+  schedule:
+    - cron: "* * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Ejecutar el bot
+        env:
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          SENDER_APP_PASSWORD: ${{ secrets.SENDER_APP_PASSWORD }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+        run: python main.py
+
+      - name: Guardar historial de alertas enviadas
+        run: |
+          git config user.name "momentum-scanner-bot"
+          git config user.email "actions@github.com"
+          if [ -z "$(git status --porcelain sent_alerts.json)" ]; then
+            echo "Sin cambios en el historial, nada que guardar."
+            exit 0
+          fi
+          for intento in 1 2 3 4 5; do
+            git fetch origin main
+            git show origin/main:sent_alerts.json > /tmp/remote_sent_alerts.json 2>/dev/null || echo '{}' > /tmp/remote_sent_alerts.json
+            python3 merge_sent_log.py
+            git add sent_alerts.json
+            if git diff --cached --quiet; then
+              echo "Sin cambios tras combinar con la versión remota."
+              exit 0
+            fi
+            git commit -m "Actualizar historial de alertas (combinado)"
+            if git push origin main; then
+              echo "Push exitoso en el intento $intento"
+              exit 0
+            fi
+            echo "Push falló, reintentando..."
+            git reset --soft HEAD~1
+            sleep $((RANDOM % 8 + 3))
+          done
+          echo "No se pudo subir el historial tras varios intentos."
+          exit 0

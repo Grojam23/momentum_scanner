@@ -7,7 +7,7 @@ name: Momentum Scanner
 #    hora de Nueva York (o sea, sonaría de 5:00am a 6:00pm ET). Ajusta esta
 #    línea a fines de marzo / fines de octubre si quieres que sea exacto
 #    todo el año, según cuándo cambie EE.UU. (no coincide con el cambio de
-#    horario de España).
+#    horario de España).  
 #
 # ⚠️ IMPORTANTE: cada 5 min x 13 horas x 5 días = ~3,300 corridas/mes. Esto
 #    excede el límite gratis de 2,000 minutos/mes de GitHub Actions para

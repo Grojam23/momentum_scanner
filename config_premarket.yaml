@@ -1,0 +1,64 @@
+# =========================================================
+# CONFIGURACIÓN ESPECÍFICA PARA PREMARKET (main_premarket.py)
+#
+# A diferencia de config.yaml (sesión regular), en premarket se usan SOLO
+# estos 4 criterios, sin rotación de float ni exigencia de noticia — el
+# premarket tiene mucho menos volumen acumulado y muchas veces la noticia
+# recién está saliendo, así que exigir esas dos cosas dejaría fuera
+# movimientos genuinos.
+#
+# Todo lo demás (universo, email, trading, etc.) es igual a config.yaml.
+# =========================================================
+
+criteria:
+  # Desactivado para premarket (no se exige rotación de float mínima)
+  volume_to_float_min: 0.0
+  volume_to_float_min_premarket: 0.0
+
+  # % de subida mínimo
+  percent_gain_min: 7.0
+
+  # Rango de precio
+  price_min: 0.5
+  price_max: 20.0
+
+  # Market Cap máximo
+  market_cap_max: 70000000
+
+  # Acciones disponibles máximo (mismo valor sin importar régimen de
+  # mercado hot/cold, a diferencia de la sesión regular). 30M por ahora,
+  # ajustable si ves que deja pasar o filtra demasiado en la práctica.
+  shares_outstanding_max_hot: 30000000
+  shares_outstanding_max_cold: 30000000
+  market_regime: auto
+  vix_hot_threshold: 20
+
+  # Desactivado para premarket (no se exige noticia/catalizador)
+  require_news: true
+  news_lookback_hours: 24
+  news_check_limit: 15
+
+# De dónde sacamos el universo de tickers a escanear en cada corrida
+universe:
+  source: tradingview_premarket
+  screener_ids:
+    - "day_gainers"
+    - "most_actives"
+    - "small_cap_gainers"
+  screener_count: 1000
+  custom_tickers: []
+  always_include: []
+
+schedule:
+  interval_minutes: 20
+  run_mode: once
+
+email:
+  enabled: true
+  subject_prefix: "🌅 Alerta Premarket"
+  smtp_server: smtp.gmail.com
+  smtp_port: 587
+  recipient_email: "tu_correo@ejemplo.com"
+  max_results: 10
+  send_even_if_no_matches: false
+  cooldown_hours: 4
